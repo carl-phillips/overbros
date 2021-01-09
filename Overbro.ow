@@ -355,12 +355,12 @@ rule("Tiny?")
 
 	actions
 	{
-		Event Player.playerScale = 0.500;
+		Event Player.playerScale = 1.00;
 		Start Scaling Player(Event Player, Event Player.playerScale, True);
 		Start Scaling Barriers(Event Player, Event Player.playerScale, True);
-		Set Move Speed(Event Player, 150 * Event Player.playerScale);
-		Set Jump Vertical Speed(Event Player, 200);
-		Set Gravity(Event Player, 50);
+		Set Move Speed(Event Player, 100 * Event Player.playerScale);
+		Set Jump Vertical Speed(Event Player, 100);
+		Set Gravity(Event Player, 100);
 		disabled Set Projectile Speed(Event Player, 100 * Event Player.playerScale);
 		disabled Set Projectile Gravity(Event Player, Event Player.playerScale);
 	}
