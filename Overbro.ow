@@ -1,0 +1,386 @@
+settings
+{
+	modes
+	{
+		Deathmatch
+		{
+			enabled maps
+			{
+				Eichenwalde
+			}
+		}
+
+		General
+		{
+			Game Mode Start: Immediately
+			Hero Limit: Off
+		}
+	}
+
+	heroes
+	{
+		General
+		{
+			McCree
+			{
+				Ultimate Ability Deadeye: Off
+			}
+
+			enabled heroes
+			{
+				McCree
+				Reaper
+			}
+		}
+	}
+}
+
+variables
+{
+	global:
+		0: damageHUD
+
+	player:
+		0: health
+		1: damageTaken
+		2: recoverCoolDown
+		3: playerScale
+		4: damageDone
+		5: recoverHUD
+		28: Damage
+}
+
+rule("Startup")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Is Assembling Heroes == True;
+	}
+
+	actions
+	{
+		"Makes game start instantly (remove eventually)"
+		Set Match Time(0);
+		Create Dummy Bot(Hero(McCree), All Teams, -1, Host Player, Host Player);
+		All Living Players(All Teams).health = 0;
+		All Living Players(All Teams).recoverCoolDown = 0;
+		Disable Built-In Game Mode Announcer;
+		Disable Built-In Game Mode Music;
+		Disable Game Mode In-World UI(All Players(All Teams));
+		Disable Messages(All Players(All Teams));
+		Disable Scoreboard(All Players(All Teams));
+	}
+}
+
+rule("Spawn AI Dummy")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Is Game In Progress == True;
+	}
+
+	actions
+	{
+		Create Dummy Bot(Hero(McCree), All Teams, -1, Host Player, Host Player);
+	}
+}
+
+rule("Spawn AI Dummy on Death")
+{
+	event
+	{
+		Player Died;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Is Dead(Event Player) == True;
+		Is Dummy Bot(Event Player) == True;
+	}
+
+	actions
+	{
+		Create Dummy Bot(Hero(McCree), All Teams, 1, Host Player, Host Player);
+	}
+}
+
+rule("Constant Heal")
+{
+	event
+	{
+		Player Took Damage;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Is Game In Progress == True;
+	}
+
+	actions
+	{
+		Set Player Health(Event Player, Max Health(Event Player));
+	}
+}
+
+rule("Health a lot")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	actions
+	{
+		Set Max Health(Event Player, 100000);
+		Set Player Health(Event Player, Max Health(Event Player));
+	}
+}
+
+rule("Player Damaged")
+{
+	event
+	{
+		Player Took Damage;
+		All;
+		All;
+	}
+
+	actions
+	{
+		Event Player.health += Event Damage;
+		Apply Impulse(Event Player, Vector Towards(Attacker, Victim) + Vector Towards(Attacker, Victim) + Vector(0, 0.200, 0) * (
+			Event Player.damageTaken / 10), Event Player.damageTaken / ((Distance Between(Attacker, Victim) + 10) * 2 / 10) * (
+			Event Damage / 100), To World, Cancel Contrary Motion);
+		Victim.damageTaken += Round To Integer(Event Damage * 0.100, Down);
+		disabled Apply Impulse(Event Player, Vector Towards(Attacker, Victim) + Up * (Event Player.Damage / 100), Event Player.Damage / 10 * (
+			Event Damage / 100), To World, Cancel Contrary Motion);
+		disabled Victim.Damage += Round To Integer(Event Damage * 0.600, Up);
+		Attacker.damageDone += Event Damage;
+	}
+}
+
+rule("Display % Above Head (Temp)")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	actions
+	{
+		Destroy In-World Text(Event Player.health);
+		Create In-World Text(All Players(All Teams), Custom String("{0}%", Is Dead(Event Player) == True ? Custom String("xD")
+			: Custom String("{0}", Round To Integer(Event Player.damageTaken * 1, Down))), Event Player, 1, Clip Against Surfaces,
+			Visible To Position and String, Color(White), Default Visibility);
+		Event Player.health = Last Text ID;
+	}
+}
+
+rule("Recoveries Recover")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Event Player.recoverCoolDown > 0;
+	}
+
+	actions
+	{
+		Event Player.recoverCoolDown -= 1;
+		Wait(1, Ignore Condition);
+		Loop If Condition Is True;
+	}
+}
+
+rule("Show Recovery Available")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Event Player.recoverCoolDown <= 0;
+	}
+
+	actions
+	{
+		Create HUD Text(Event Player, Icon String(Bolt), Null, Null, Left, 0, Color(Rose), Color(White), Color(Red), Visible To and String,
+			Default Visibility);
+		Event Player.recoverHUD = Last Text ID;
+	}
+}
+
+rule("onDeath")
+{
+	event
+	{
+		Player Died;
+		All;
+		All;
+	}
+
+	actions
+	{
+		Event Player.health = 0;
+		Event Player.damageTaken = 0;
+		Event Player.recoverCoolDown = 0;
+	}
+}
+
+rule("Mccree's Recover")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Is Button Held(Event Player, Button(Ultimate)) == True;
+		Event Player.recoverCoolDown <= 0;
+		Hero Of(Event Player) == Hero(McCree);
+		Has Status(Event Player, Knocked Down) == False;
+		Has Status(Event Player, Asleep) == False;
+		Has Status(Event Player, Frozen) == False;
+		Has Status(Event Player, Rooted) == False;
+	}
+
+	actions
+	{
+		Destroy HUD Text(Event Player.recoverHUD);
+		disabled Set Ability Cooldown(Event Player, Button(Ability 1), 0);
+		disabled Press Button(Event Player, Button(Ability 1));
+		Apply Impulse(Event Player, Facing Direction Of(Event Player) + Vector(0, 0.550, 0), 20, To World, Cancel Contrary Motion XYZ);
+		Play Effect(All Players(All Teams), Good Pickup Effect, Color(Orange), Event Player, 10);
+		Communicate(Event Player, Push Forward);
+		Event Player.recoverCoolDown = 5;
+		Wait(0.550, Ignore Condition);
+		disabled Set Ability Cooldown(Event Player, Button(Ability 1), 0);
+	}
+}
+
+rule("Reaper's Recover")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Is Button Held(Event Player, Button(Ultimate)) == True;
+		Event Player.recoverCoolDown <= 0;
+		Hero Of(Event Player) == Hero(Reaper);
+		Has Status(Event Player, Knocked Down) == False;
+		Has Status(Event Player, Asleep) == False;
+		Has Status(Event Player, Frozen) == False;
+		Has Status(Event Player, Rooted) == False;
+	}
+
+	actions
+	{
+		Destroy HUD Text(Event Player.recoverHUD);
+		Set Status(Event Player, Null, Phased Out, 9999);
+		Apply Impulse(Event Player, Facing Direction Of(Event Player) + Vector(0, 0.550, 0), 30, To World, Cancel Contrary Motion XYZ);
+		Communicate(Event Player, Sorry);
+		Play Effect(All Players(All Teams), Bad Pickup Effect, Color(Purple), Event Player, 10);
+		Event Player.recoverCoolDown = 5;
+		Wait(2, Ignore Condition);
+		Clear Status(Event Player, Phased Out);
+	}
+}
+
+rule("Rechoose Characters")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Is Button Held(Event Player, Button(Interact)) == True;
+	}
+
+	actions
+	{
+		Wait(3.250, Ignore Condition);
+		Abort If Condition Is False;
+		Go To Assemble Heroes;
+	}
+}
+
+rule("Tiny?")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	actions
+	{
+		Event Player.playerScale = 0.500;
+		Start Scaling Player(Event Player, Event Player.playerScale, True);
+		Start Scaling Barriers(Event Player, Event Player.playerScale, True);
+		Set Move Speed(Event Player, 150 * Event Player.playerScale);
+		Set Jump Vertical Speed(Event Player, 200);
+		Set Gravity(Event Player, 50);
+		disabled Set Projectile Speed(Event Player, 100 * Event Player.playerScale);
+		disabled Set Projectile Gravity(Event Player, Event Player.playerScale);
+	}
+}
+
+rule("Show Damage Done")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	actions
+	{
+		Destroy HUD Text(Global.damageHUD);
+		Create HUD Text(Event Player, Event Player.damageDone * 0.100, Null, Null, Right, 0, Color(White), Color(White), Color(White),
+			Visible To and String, Default Visibility);
+		Global.damageHUD = Last Text ID;
+		Wait(0.500, Ignore Condition);
+	}
+}
