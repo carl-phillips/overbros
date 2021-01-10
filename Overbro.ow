@@ -6,7 +6,7 @@ settings
 		{
 			enabled maps
 			{
-				Eichenwalde
+				Hollywood
 			}
 		}
 
@@ -14,6 +14,9 @@ settings
 		{
 			Game Mode Start: Immediately
 			Hero Limit: Off
+			Respawn Time Scalar: 0%
+			Score To Win: 50
+			Self Initiated Respawn: Off
 		}
 	}
 
@@ -23,13 +26,27 @@ settings
 		{
 			McCree
 			{
+				Ammunition Clip Size Scalar: 201%
+				Damage Dealt: 125%
 				Ultimate Ability Deadeye: Off
+			}
+
+			Pharah
+			{
+				Concussive Blast Knockback Scalar: 150%
+				Damage Dealt: 75%
+				Hover Jets: Off
+				Jump Jet: Off
+				Rocket Launcher Knockback Scalar: 0%
 			}
 
 			enabled heroes
 			{
+				Hanzo
 				McCree
+				Pharah
 				Reaper
+				Zenyatta
 			}
 		}
 	}
@@ -39,6 +56,9 @@ variables
 {
 	global:
 		0: damageHUD
+		1: theMap
+		2: mapSpawnPos
+		3: playersLeft
 
 	player:
 		0: health
@@ -47,6 +67,9 @@ variables
 		3: playerScale
 		4: damageDone
 		5: recoverHUD
+		6: playerDistanceModifier
+		7: spawnProtection
+		8: Lives
 		28: Damage
 }
 
@@ -64,9 +87,9 @@ rule("Startup")
 
 	actions
 	{
+		Global.playersLeft = Number Of Players(All Teams);
 		"Makes game start instantly (remove eventually)"
-		Set Match Time(0);
-		Create Dummy Bot(Hero(McCree), All Teams, -1, Host Player, Host Player);
+		Set Match Time(10);
 		All Living Players(All Teams).health = 0;
 		All Living Players(All Teams).recoverCoolDown = 0;
 		Disable Built-In Game Mode Announcer;
@@ -74,10 +97,38 @@ rule("Startup")
 		Disable Game Mode In-World UI(All Players(All Teams));
 		Disable Messages(All Players(All Teams));
 		Disable Scoreboard(All Players(All Teams));
+		Disable Built-In Game Mode Respawning(All Players(All Teams));
 	}
 }
 
-rule("Spawn AI Dummy")
+rule("Spawn")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Has Spawned(Event Player) == True;
+	}
+
+	actions
+	{
+		Global.playersLeft = Number Of Players(All Teams);
+		Teleport(Event Player, Random Value In Array(Global.mapSpawnPos));
+		Disable Built-In Game Mode Respawning(All Players(All Teams));
+		Event Player.Lives = 3;
+		Disable Built-In Game Mode Announcer;
+		Disable Built-In Game Mode Music;
+		Disable Messages(All Players(All Teams));
+		Disable Scoreboard(All Players(All Teams));
+	}
+}
+
+disabled rule("Spawn AI Dummy")
 {
 	event
 	{
@@ -91,11 +142,11 @@ rule("Spawn AI Dummy")
 
 	actions
 	{
-		Create Dummy Bot(Hero(McCree), All Teams, -1, Host Player, Host Player);
+		Create Dummy Bot(Hero(McCree), All Teams, 5, Host Player, Host Player);
 	}
 }
 
-rule("Spawn AI Dummy on Death")
+disabled rule("Spawn AI Dummy on Death")
 {
 	event
 	{
@@ -165,13 +216,47 @@ rule("Player Damaged")
 	{
 		Event Player.health += Event Damage;
 		Apply Impulse(Event Player, Vector Towards(Attacker, Victim) + Vector Towards(Attacker, Victim) + Vector(0, 0.200, 0) * (
-			Event Player.damageTaken / 10), Event Player.damageTaken / ((Distance Between(Attacker, Victim) + 10) * 2 / 10) * (
-			Event Damage / 100), To World, Cancel Contrary Motion);
+			Event Player.damageTaken / 10), Event Player.damageTaken / (Distance Between(Attacker, Victim)
+			* Attacker.playerDistanceModifier / (2 + 10)) * (Event Damage / 500), To World, Incorporate Contrary Motion);
 		Victim.damageTaken += Round To Integer(Event Damage * 0.100, Down);
 		disabled Apply Impulse(Event Player, Vector Towards(Attacker, Victim) + Up * (Event Player.Damage / 100), Event Player.Damage / 10 * (
 			Event Damage / 100), To World, Cancel Contrary Motion);
 		disabled Victim.Damage += Round To Integer(Event Damage * 0.600, Up);
 		Attacker.damageDone += Event Damage;
+	}
+}
+
+rule("Zenyatta's Recover")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Is Button Held(Event Player, Button(Interact)) == True;
+		Event Player.recoverCoolDown <= 0;
+		Hero Of(Event Player) == Hero(Zenyatta);
+		Has Status(Event Player, Knocked Down) == False;
+		Has Status(Event Player, Asleep) == False;
+		Has Status(Event Player, Frozen) == False;
+		Has Status(Event Player, Rooted) == False;
+	}
+
+	actions
+	{
+		Destroy HUD Text(Event Player.recoverHUD);
+		disabled Set Ability Cooldown(Event Player, Button(Ability 1), 0);
+		disabled Press Button(Event Player, Button(Ability 1));
+		Apply Impulse(Event Player, Facing Direction Of(Event Player) + Vector(0, 0.550, 0), 30, To World, Cancel Contrary Motion XYZ);
+		Play Effect(All Players(All Teams), Good Pickup Effect, Color(Orange), Event Player, 10);
+		Communicate(Event Player, Push Forward);
+		Event Player.recoverCoolDown = 5;
+		Wait(0.550, Ignore Condition);
+		disabled Set Ability Cooldown(Event Player, Button(Ability 1), 0);
 	}
 }
 
@@ -232,8 +317,8 @@ rule("Show Recovery Available")
 
 	actions
 	{
-		Create HUD Text(Event Player, Icon String(Bolt), Null, Null, Left, 0, Color(Rose), Color(White), Color(Red), Visible To and String,
-			Default Visibility);
+		Create HUD Text(Event Player, Icon String(Bolt), Custom String("Interact"), Null, Left, 0, Color(Rose), Color(White), Color(Red),
+			Visible To and String, Default Visibility);
 		Event Player.recoverHUD = Last Text ID;
 	}
 }
@@ -266,7 +351,7 @@ rule("Mccree's Recover")
 
 	conditions
 	{
-		Is Button Held(Event Player, Button(Ultimate)) == True;
+		Is Button Held(Event Player, Button(Interact)) == True;
 		Event Player.recoverCoolDown <= 0;
 		Hero Of(Event Player) == Hero(McCree);
 		Has Status(Event Player, Knocked Down) == False;
@@ -280,7 +365,7 @@ rule("Mccree's Recover")
 		Destroy HUD Text(Event Player.recoverHUD);
 		disabled Set Ability Cooldown(Event Player, Button(Ability 1), 0);
 		disabled Press Button(Event Player, Button(Ability 1));
-		Apply Impulse(Event Player, Facing Direction Of(Event Player) + Vector(0, 0.550, 0), 20, To World, Cancel Contrary Motion XYZ);
+		Apply Impulse(Event Player, Facing Direction Of(Event Player) + Vector(0, 0.550, 0), 30, To World, Cancel Contrary Motion XYZ);
 		Play Effect(All Players(All Teams), Good Pickup Effect, Color(Orange), Event Player, 10);
 		Communicate(Event Player, Push Forward);
 		Event Player.recoverCoolDown = 5;
@@ -300,7 +385,7 @@ rule("Reaper's Recover")
 
 	conditions
 	{
-		Is Button Held(Event Player, Button(Ultimate)) == True;
+		Is Button Held(Event Player, Button(Interact)) == True;
 		Event Player.recoverCoolDown <= 0;
 		Hero Of(Event Player) == Hero(Reaper);
 		Has Status(Event Player, Knocked Down) == False;
@@ -322,6 +407,106 @@ rule("Reaper's Recover")
 	}
 }
 
+rule("Hanzo's Recover")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Is Button Held(Event Player, Button(Interact)) == True;
+		Event Player.recoverCoolDown <= 0;
+		Hero Of(Event Player) == Hero(Hanzo);
+		Has Status(Event Player, Knocked Down) == False;
+		Has Status(Event Player, Asleep) == False;
+		Has Status(Event Player, Frozen) == False;
+		Has Status(Event Player, Rooted) == False;
+	}
+
+	actions
+	{
+		Destroy HUD Text(Event Player.recoverHUD);
+		Set Status(Event Player, Null, Phased Out, 9999);
+		Apply Impulse(Event Player, Facing Direction Of(Event Player) + Vector(0, 0.550, 0), 30, To World, Cancel Contrary Motion XYZ);
+		Communicate(Event Player, Incoming);
+		Play Effect(All Players(All Teams), Bad Pickup Effect, Color(Orange), Event Player, 10);
+		Event Player.recoverCoolDown = 5;
+		Wait(2, Ignore Condition);
+		Clear Status(Event Player, Phased Out);
+	}
+}
+
+rule("Phara's Recover")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Is Button Held(Event Player, Button(Interact)) == True;
+		Event Player.recoverCoolDown <= 0;
+		Hero Of(Event Player) == Hero(Pharah);
+		Has Status(Event Player, Knocked Down) == False;
+		Has Status(Event Player, Asleep) == False;
+		Has Status(Event Player, Frozen) == False;
+		Has Status(Event Player, Rooted) == False;
+	}
+
+	actions
+	{
+		Destroy HUD Text(Event Player.recoverHUD);
+		Set Status(Event Player, Null, Phased Out, 9999);
+		Apply Impulse(Event Player, Facing Direction Of(Event Player) + Vector(0, 0.550, 0), 30, To World, Cancel Contrary Motion XYZ);
+		Communicate(Event Player, Press the Attack);
+		Play Effect(All Players(All Teams), Bad Pickup Effect, Color(Purple), Event Player, 10);
+		Event Player.recoverCoolDown = 5;
+		Wait(2, Ignore Condition);
+		Clear Status(Event Player, Phased Out);
+	}
+}
+
+rule("Zenyatta's Recover")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Is Button Held(Event Player, Button(Interact)) == True;
+		Event Player.recoverCoolDown <= 0;
+		Hero Of(Event Player) == Hero(Zenyatta);
+		Has Status(Event Player, Knocked Down) == False;
+		Has Status(Event Player, Asleep) == False;
+		Has Status(Event Player, Frozen) == False;
+		Has Status(Event Player, Rooted) == False;
+	}
+
+	actions
+	{
+		Destroy HUD Text(Event Player.recoverHUD);
+		disabled Set Ability Cooldown(Event Player, Button(Ability 1), 0);
+		disabled Press Button(Event Player, Button(Ability 1));
+		Apply Impulse(Event Player, Facing Direction Of(Event Player) + Vector(0, 0.550, 0), 30, To World, Cancel Contrary Motion XYZ);
+		Play Effect(All Players(All Teams), Good Pickup Effect, Color(Orange), Event Player, 10);
+		Communicate(Event Player, Push Forward);
+		Event Player.recoverCoolDown = 5;
+		Wait(0.550, Ignore Condition);
+		disabled Set Ability Cooldown(Event Player, Button(Ability 1), 0);
+	}
+}
+
 rule("Rechoose Characters")
 {
 	event
@@ -334,6 +519,7 @@ rule("Rechoose Characters")
 	conditions
 	{
 		Is Button Held(Event Player, Button(Interact)) == True;
+		Is Button Held(Event Player, Button(Ultimate)) == True;
 	}
 
 	actions
@@ -355,14 +541,16 @@ rule("Tiny?")
 
 	actions
 	{
-		Event Player.playerScale = 1.00;
+		Event Player.playerScale = 0.750;
 		Start Scaling Player(Event Player, Event Player.playerScale, True);
 		Start Scaling Barriers(Event Player, Event Player.playerScale, True);
-		Set Move Speed(Event Player, 100 * Event Player.playerScale);
-		Set Jump Vertical Speed(Event Player, 100);
-		Set Gravity(Event Player, 100);
+		Set Move Speed(Event Player, 120 * Event Player.playerScale);
+		Set Jump Vertical Speed(Event Player, 150);
+		Set Gravity(Event Player, 80);
 		disabled Set Projectile Speed(Event Player, 100 * Event Player.playerScale);
 		disabled Set Projectile Gravity(Event Player, Event Player.playerScale);
+		Global.damageHUD = 0;
+		Start Modifying Hero Voice Lines(Event Player, Event Player.playerScale, True);
 	}
 }
 
@@ -377,10 +565,256 @@ rule("Show Damage Done")
 
 	actions
 	{
+		Create HUD Text(All Players(All Teams), Event Player, Event Player.Lives, Null, Left, 0, Color(White), Color(White), Color(White),
+			Visible To and String, Default Visibility);
 		Destroy HUD Text(Global.damageHUD);
 		Create HUD Text(Event Player, Event Player.damageDone * 0.100, Null, Null, Right, 0, Color(White), Color(White), Color(White),
 			Visible To and String, Default Visibility);
 		Global.damageHUD = Last Text ID;
 		Wait(0.500, Ignore Condition);
+	}
+}
+
+rule("Mccree playerDistanceModifier")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Hero Of(Event Player) == Hero(McCree);
+	}
+
+	actions
+	{
+		Event Player.playerDistanceModifier = 0.300;
+	}
+}
+
+rule("Reaper playerDistanceModifier")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Hero Of(Event Player) == Hero(Reaper);
+	}
+
+	actions
+	{
+		Event Player.playerDistanceModifier = 0.750;
+	}
+}
+
+rule("Hanzo playerDistanceModifier")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Hero Of(Event Player) == Hero(Hanzo);
+	}
+
+	actions
+	{
+		Event Player.playerDistanceModifier = 0.510;
+	}
+}
+
+rule("Phara playerDistanceModifier")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Hero Of(Event Player) == Hero(Pharah);
+	}
+
+	actions
+	{
+		Event Player.playerDistanceModifier = 0.010;
+	}
+}
+
+rule("Zenyatta playerDistanceModifier")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Hero Of(Event Player) == Hero(Zenyatta);
+	}
+
+	actions
+	{
+		Event Player.playerDistanceModifier = 0.500;
+	}
+}
+
+rule("Map Hollywood")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Current Map == Map(Hollywood);
+	}
+
+	actions
+	{
+		Global.theMap = Map(Hollywood);
+	}
+}
+
+rule("Kill Barrier for Hollywood")
+{
+	event
+	{
+		Ongoing - Each Player;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Global.theMap == Map(Hollywood);
+		Y Component Of(Position Of(Event Player)) < Y Component Of(Vector(0, 8, 0));
+		Is On Ground(Event Player) == True;
+		Event Player.spawnProtection == False;
+	}
+
+	actions
+	{
+		Kill(Event Player, Event Player);
+		Create Effect(All Players(All Teams), Sparkles, Color(Red), Vector(0, 5.999, 0), 200, Visible To Position and Radius);
+		Create Effect(All Players(All Teams), Sparkles, Color(Red), Vector(0, 5.999, 0), 200, Visible To Position and Radius);
+		Create Effect(All Players(All Teams), Sparkles, Color(Red), Vector(0, 5.999, 0), 200, Visible To Position and Radius);
+		Create Effect(All Players(All Teams), Bad Aura Sound, Color(Red), Vector(0, 5.990, 0), 200, Visible To Position and Radius);
+		Create Effect(All Players(All Teams), Sparkles, Color(Red), Vector(0, 5.999, 0), 200, Visible To Position and Radius);
+		Create Effect(All Players(All Teams), Sparkles, Color(Red), Vector(0, 5.999, 0), 200, Visible To Position and Radius);
+		Create Effect(All Players(All Teams), Sparkles, Color(Red), Vector(0, 5.999, 0), 200, Visible To Position and Radius);
+		Create Effect(All Players(All Teams), Sparkles, Color(Red), Vector(0, 5.999, 0), 200, Visible To Position and Radius);
+		Create Effect(All Players(All Teams), Sparkles, Color(Red), Vector(0, 5.999, 0), 200, Visible To Position and Radius);
+	}
+}
+
+rule("Set Spawn Points")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Global.theMap == Map(Hollywood);
+	}
+
+	actions
+	{
+		Global.mapSpawnPos = Empty Array;
+		Modify Global Variable(mapSpawnPos, Append To Array, Vector(7.736, 11.010, -67.051));
+		Modify Global Variable(mapSpawnPos, Append To Array, Vector(-2.058, 11.010, -65.287));
+		Modify Global Variable(mapSpawnPos, Append To Array, Vector(-4.919, 10.010, -60.495));
+		Modify Global Variable(mapSpawnPos, Append To Array, Vector(12.194, 10.750, -33.238));
+		Modify Global Variable(mapSpawnPos, Append To Array, Vector(8.416, 10.750, -29.866));
+		Modify Global Variable(mapSpawnPos, Append To Array, Vector(1.749, 10.750, -29.313));
+		Modify Global Variable(mapSpawnPos, Append To Array, Vector(8.472, 13.906, -38.313));
+	}
+}
+
+rule("Spawn Player on Death")
+{
+	event
+	{
+		Player Died;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Event Player.Lives > 0;
+	}
+
+	actions
+	{
+		Event Player.Lives -= 1;
+		Abort If Condition Is False;
+		Event Player.spawnProtection = True;
+		Respawn(Event Player);
+		Wait(0.350, Ignore Condition);
+		Teleport(Event Player, Random Value In Array(Global.mapSpawnPos));
+		Wait(1, Ignore Condition);
+		Event Player.spawnProtection = False;
+	}
+}
+
+rule("Game Over")
+{
+	event
+	{
+		Ongoing - Global;
+	}
+
+	conditions
+	{
+		Is Assembling Heroes == False;
+		Global.playersLeft == 1;
+	}
+
+	actions
+	{
+		Big Message(All Players(All Teams), Custom String("GAME OVER", All Living Players(All Teams), Custom String("WINS")));
+		Set Player Score(All Living Players(All Teams), 1000);
+		Wait(4.250, Ignore Condition);
+		Set Match Time(0);
+	}
+}
+
+rule("Ran Out Of Lives")
+{
+	event
+	{
+		Player Died;
+		All;
+		All;
+	}
+
+	conditions
+	{
+		Event Player.Lives < 1;
+	}
+
+	actions
+	{
+		Global.playersLeft -= 1;
 	}
 }
